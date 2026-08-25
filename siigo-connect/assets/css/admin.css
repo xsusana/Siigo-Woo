@@ -1,0 +1,30 @@
+.siigoc-wrap #siigoc-test-result {
+	margin-left: 8px;
+	font-weight: 600;
+}
+
+.siigoc-wrap #siigoc-test-result.siigoc-ok {
+	color: #00753a;
+}
+
+.siigoc-wrap #siigoc-test-result.siigoc-fail {
+	color: #b32d2e;
+}
+
+.siigoc-log-table td {
+	vertical-align: top;
+}
+
+.siigoc-log-table tr.siigoc-log-error td:nth-child( 2 ) {
+	color: #b32d2e;
+	font-weight: 600;
+}
+
+.siigoc-log-table details pre {
+	max-height: 240px;
+	overflow: auto;
+	background: #f6f7f7;
+	padding: 8px;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
