@@ -58,7 +58,7 @@ class Siigoc_Settings {
 
 		$clean = $saved;
 
-		$text_fields = array( 'username', 'partner_id', 'document_type_id', 'seller_id', 'cost_center_id', 'payment_type_id' );
+		$text_fields = array( 'username', 'partner_id', 'document_type_id', 'seller_id', 'cost_center_id', 'payment_type_id', 'tax_id', 'shipping_sku', 'default_state_code', 'default_city_code' );
 		foreach ( $text_fields as $field ) {
 			if ( array_key_exists( $field, $input ) ) {
 				$clean[ $field ] = sanitize_text_field( $input[ $field ] );
@@ -77,8 +77,18 @@ class Siigoc_Settings {
 			$clean['trigger'] = in_array( $input['trigger'], array( 'paid', 'completed', 'manual' ), true ) ? $input['trigger'] : 'paid';
 		}
 
-		foreach ( array( 'sync_products', 'sync_stock' ) as $field ) {
-			if ( array_key_exists( '_tab', $input ) && 'sync' === $input['_tab'] ) {
+		// Checkboxes: solo se procesan los de la pestaña que se está guardando
+		// (un checkbox sin marcar no llega en el POST).
+		$tab = array_key_exists( '_tab', $input ) ? $input['_tab'] : '';
+
+		if ( 'sync' === $tab ) {
+			foreach ( array( 'sync_products', 'sync_stock', 'sync_create_products' ) as $field ) {
+				$clean[ $field ] = ! empty( $input[ $field ] ) ? 'yes' : 'no';
+			}
+		}
+
+		if ( 'invoicing' === $tab ) {
+			foreach ( array( 'send_dian', 'send_email' ) as $field ) {
 				$clean[ $field ] = ! empty( $input[ $field ] ) ? 'yes' : 'no';
 			}
 		}
@@ -149,6 +159,7 @@ class Siigoc_Settings {
 			'users'          => array(),
 			'cost_centers'   => array(),
 			'payment_types'  => array(),
+			'taxes'          => array(),
 			'error'          => '',
 		);
 
@@ -170,6 +181,7 @@ class Siigoc_Settings {
 			'users'          => 'get_users',
 			'cost_centers'   => 'get_cost_centers',
 			'payment_types'  => 'get_payment_types',
+			'taxes'          => 'get_taxes',
 		);
 
 		foreach ( $calls as $key => $method ) {
@@ -378,7 +390,62 @@ class Siigoc_Settings {
 							</option>
 						<?php endforeach; ?>
 					</select>
-					<p class="description"><?php esc_html_e( 'Se usará para registrar el pago de las facturas creadas desde WooCommerce. En una fase siguiente se podrá mapear por método de pago de Woo.', 'siigo-connect' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Se usará para registrar el pago de las facturas creadas desde WooCommerce.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><label for="siigoc-tax"><?php esc_html_e( 'Impuesto (IVA)', 'siigo-connect' ); ?></label></th>
+				<td>
+					<select name="<?php echo esc_attr( self::OPTION ); ?>[tax_id]" id="siigoc-tax">
+						<option value=""><?php esc_html_e( '— Sin impuesto —', 'siigo-connect' ); ?></option>
+						<?php foreach ( $catalogs['taxes'] as $tax ) : ?>
+							<?php
+							if ( ! isset( $tax['id'] ) ) {
+								continue;
+							}
+							$tax_label = isset( $tax['name'] ) ? $tax['name'] : $tax['id'];
+							if ( isset( $tax['percentage'] ) ) {
+								$tax_label .= ' (' . $tax['percentage'] . '%)';
+							}
+							?>
+							<option value="<?php echo esc_attr( $tax['id'] ); ?>" <?php selected( (string) $settings['tax_id'], (string) $tax['id'] ); ?>><?php echo esc_html( $tax_label ); ?></option>
+						<?php endforeach; ?>
+					</select>
+					<p class="description"><?php esc_html_e( 'Se aplica a las líneas del pedido que tengan impuesto en WooCommerce. Los precios se envían a Siigo sin IVA y Siigo lo calcula con este impuesto.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><label for="siigoc-shipping-sku"><?php esc_html_e( 'Código del producto de envío', 'siigo-connect' ); ?></label></th>
+				<td>
+					<input name="<?php echo esc_attr( self::OPTION ); ?>[shipping_sku]" id="siigoc-shipping-sku" type="text" class="regular-text" value="<?php echo esc_attr( $settings['shipping_sku'] ); ?>" placeholder="ENVIO" />
+					<p class="description"><?php esc_html_e( 'Código de un producto/servicio creado en Siigo para facturar el costo de envío como una línea más. Obligatorio si cobras envíos.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Ciudad por defecto (DANE)', 'siigo-connect' ); ?></th>
+				<td>
+					<label><?php esc_html_e( 'Departamento', 'siigo-connect' ); ?>
+						<input name="<?php echo esc_attr( self::OPTION ); ?>[default_state_code]" type="text" size="4" value="<?php echo esc_attr( $settings['default_state_code'] ); ?>" />
+					</label>
+					&nbsp;
+					<label><?php esc_html_e( 'Municipio', 'siigo-connect' ); ?>
+						<input name="<?php echo esc_attr( self::OPTION ); ?>[default_city_code]" type="text" size="7" value="<?php echo esc_attr( $settings['default_city_code'] ); ?>" />
+					</label>
+					<p class="description"><?php esc_html_e( 'Códigos DANE usados al crear terceros (ej. 11 y 11001 para Bogotá). Siigo exige código de municipio y no puede deducirse del texto libre que escribe el cliente; el filtro siigoc_customer_city permite un mapeo más fino.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Al emitir', 'siigo-connect' ); ?></th>
+				<td>
+					<label>
+						<input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[send_dian]" value="yes" <?php checked( $settings['send_dian'], 'yes' ); ?> />
+						<?php esc_html_e( 'Enviar a la DIAN (solo aplica a comprobantes electrónicos).', 'siigo-connect' ); ?>
+					</label>
+					<br />
+					<label>
+						<input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[send_email]" value="yes" <?php checked( $settings['send_email'], 'yes' ); ?> />
+						<?php esc_html_e( 'Enviar la factura por correo al cliente desde Siigo.', 'siigo-connect' ); ?>
+					</label>
 				</td>
 			</tr>
 		</table>
@@ -386,6 +453,11 @@ class Siigoc_Settings {
 	}
 
 	private function render_sync_tab( $settings ) {
+		$last_run = get_option( Siigoc_Product_Sync::LAST_RUN_OPT );
+
+		if ( isset( $_GET['synced'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			echo '<div class="notice notice-success inline"><p>' . esc_html__( 'Sincronización ejecutada. Revisa el resumen abajo y el detalle en el Registro.', 'siigo-connect' ) . '</p></div>';
+		}
 		?>
 		<table class="form-table" role="presentation">
 			<tr>
@@ -407,6 +479,15 @@ class Siigoc_Settings {
 				</td>
 			</tr>
 			<tr>
+				<th scope="row"><?php esc_html_e( 'Crear productos nuevos', 'siigo-connect' ); ?></th>
+				<td>
+					<label>
+						<input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[sync_create_products]" value="yes" <?php checked( $settings['sync_create_products'], 'yes' ); ?> />
+						<?php esc_html_e( 'Si un producto de Siigo no existe en WooCommerce, crearlo como borrador (tú lo revisas y publicas).', 'siigo-connect' ); ?>
+					</label>
+				</td>
+			</tr>
+			<tr>
 				<th scope="row"><label for="siigoc-sync-interval"><?php esc_html_e( 'Frecuencia', 'siigo-connect' ); ?></label></th>
 				<td>
 					<select name="<?php echo esc_attr( self::OPTION ); ?>[sync_interval]" id="siigoc-sync-interval">
@@ -415,7 +496,31 @@ class Siigoc_Settings {
 						<option value="twicedaily" <?php selected( $settings['sync_interval'], 'twicedaily' ); ?>><?php esc_html_e( 'Dos veces al día', 'siigo-connect' ); ?></option>
 						<option value="daily" <?php selected( $settings['sync_interval'], 'daily' ); ?>><?php esc_html_e( 'Una vez al día', 'siigo-connect' ); ?></option>
 					</select>
-					<p class="description"><?php esc_html_e( 'El motor de sincronización se activa en la siguiente fase del plugin; estos ajustes ya quedan guardados.', 'siigo-connect' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Los cambios de frecuencia se aplican al guardar.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Sincronización manual', 'siigo-connect' ); ?></th>
+				<td>
+					<a class="button" href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'action', 'siigoc_sync_now', admin_url( 'admin-post.php' ) ), 'siigoc_sync_now' ) ); ?>">
+						<?php esc_html_e( 'Sincronizar ahora', 'siigo-connect' ); ?>
+					</a>
+					<?php if ( is_array( $last_run ) && ! empty( $last_run['time'] ) ) : ?>
+						<p class="description">
+							<?php
+							printf(
+								/* translators: 1: fecha, 2: actualizados, 3: creados, 4: omitidos, 5: errores. */
+								esc_html__( 'Última corrida: %1$s — %2$d actualizados, %3$d creados, %4$d omitidos, %5$d errores.', 'siigo-connect' ),
+								esc_html( wp_date( 'Y-m-d H:i', $last_run['time'] ) ),
+								(int) $last_run['stats']['updated'],
+								(int) $last_run['stats']['created'],
+								(int) $last_run['stats']['skipped'],
+								(int) $last_run['stats']['errors']
+							);
+							?>
+						</p>
+					<?php endif; ?>
+					<p class="description"><?php esc_html_e( 'Guarda los ajustes antes de sincronizar. El emparejamiento es por SKU de Woo = código del producto en Siigo.', 'siigo-connect' ); ?></p>
 				</td>
 			</tr>
 		</table>

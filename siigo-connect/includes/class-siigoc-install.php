@@ -38,4 +38,14 @@ class Siigoc_Install {
 
 		update_option( 'siigoc_version', SIIGOC_VERSION );
 	}
+
+	/**
+	 * Al desactivar: quitar todos los eventos de cron del plugin
+	 * (los reintentos de facturas pendientes incluidos).
+	 */
+	public static function deactivate() {
+		foreach ( array( 'siigoc_sync_cron', 'siigoc_sync_continue', 'siigoc_process_invoice', 'siigoc_purge_logs' ) as $hook ) {
+			wp_unschedule_hook( $hook );
+		}
+	}
 }

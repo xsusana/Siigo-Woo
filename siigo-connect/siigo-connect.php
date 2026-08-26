@@ -3,7 +3,7 @@
  * Plugin Name:       Siigo Connect para WooCommerce
  * Plugin URI:        https://github.com/danielserna/siigo-connect
  * Description:       Conecta WooCommerce con Siigo Nube: facturación automática (electrónica o interna), sincronización de productos, inventario y clientes.
- * Version:           0.1.0
+ * Version:           1.0.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Daniel Serna
@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'SIIGOC_VERSION', '0.1.0' );
+define( 'SIIGOC_VERSION', '1.0.0' );
 define( 'SIIGOC_PLUGIN_FILE', __FILE__ );
 define( 'SIIGOC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'SIIGOC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -22,10 +22,16 @@ define( 'SIIGOC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-logger.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-api-client.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-install.php';
+require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-checkout-fields.php';
+require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-customer.php';
+require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-invoice.php';
+require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-product-sync.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/admin/class-siigoc-settings.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/admin/class-siigoc-logs-page.php';
+require_once SIIGOC_PLUGIN_DIR . 'includes/admin/class-siigoc-order-metabox.php';
 
 register_activation_hook( __FILE__, array( 'Siigoc_Install', 'activate' ) );
+register_deactivation_hook( __FILE__, array( 'Siigoc_Install', 'deactivate' ) );
 
 /**
  * Devuelve los ajustes del plugin con sus valores por defecto.
@@ -44,9 +50,17 @@ function siigoc_get_settings() {
 		'seller_id'        => '',
 		'cost_center_id'   => '',
 		'payment_type_id'  => '',
+		'tax_id'           => '',
+		'shipping_sku'     => '',
+		'send_dian'        => 'yes',
+		'send_email'       => 'no',
+		// Códigos DANE por defecto para terceros (11 / 11001 = Bogotá).
+		'default_state_code' => '11',
+		'default_city_code'  => '11001',
 		// Sincronización.
 		'sync_products'    => 'no',
 		'sync_stock'       => 'no',
+		'sync_create_products' => 'no',
 		'sync_interval'    => 'hourly',
 	);
 
@@ -86,13 +100,24 @@ function siigoc_init() {
 		new Siigoc_Logs_Page();
 	}
 
+	// Limpieza diaria del log (entradas de más de 30 días).
+	add_action( 'siigoc_purge_logs', array( 'Siigoc_Logger', 'purge_old' ) );
+	if ( ! wp_next_scheduled( 'siigoc_purge_logs' ) ) {
+		wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'siigoc_purge_logs' );
+	}
+
 	if ( ! class_exists( 'WooCommerce' ) ) {
 		add_action( 'admin_notices', 'siigoc_woocommerce_missing_notice' );
 		return;
 	}
 
-	// Los módulos que dependen de WooCommerce (facturación, checkout, sync)
-	// se cargan aquí en las siguientes fases.
+	new Siigoc_Checkout_Fields();
+	new Siigoc_Invoice();
+	new Siigoc_Product_Sync();
+
+	if ( is_admin() ) {
+		new Siigoc_Order_Metabox();
+	}
 }
 add_action( 'plugins_loaded', 'siigoc_init' );
 

@@ -11,6 +11,7 @@ global $wpdb;
 
 delete_option( 'siigoc_settings' );
 delete_option( 'siigoc_version' );
+delete_option( 'siigoc_last_sync' );
 delete_transient( 'siigoc_access_token' );
 delete_transient( 'siigoc_catalog_cache' );
 
