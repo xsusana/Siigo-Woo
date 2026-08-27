@@ -508,17 +508,33 @@ class Siigoc_Settings {
 					<?php if ( is_array( $last_run ) && ! empty( $last_run['time'] ) ) : ?>
 						<p class="description">
 							<?php
-							printf(
-								/* translators: 1: fecha, 2: actualizados, 3: creados, 4: omitidos, 5: errores. */
-								esc_html__( 'Última corrida: %1$s — %2$d actualizados, %3$d creados, %4$d omitidos, %5$d errores.', 'siigo-connect' ),
-								esc_html( wp_date( 'Y-m-d H:i', $last_run['time'] ) ),
-								(int) $last_run['stats']['updated'],
-								(int) $last_run['stats']['created'],
-								(int) $last_run['stats']['skipped'],
-								(int) $last_run['stats']['errors']
-							);
+							if ( ! empty( $last_run['partial'] ) ) {
+								printf(
+									/* translators: 1: fecha, 2: página, 3: actualizados hasta ahora. */
+									esc_html__( 'Sincronización en curso desde %1$s: va en la página %2$d del catálogo (%3$d productos actualizados hasta ahora). Continúa en segundo plano; recarga esta página en unos minutos.', 'siigo-connect' ),
+									esc_html( wp_date( 'Y-m-d H:i', $last_run['time'] ) ),
+									(int) $last_run['next_page'],
+									(int) $last_run['stats']['updated']
+								);
+							} else {
+								printf(
+									/* translators: 1: fecha, 2: actualizados, 3: creados, 4: omitidos, 5: errores. */
+									esc_html__( 'Última corrida: %1$s — %2$d actualizados, %3$d creados, %4$d omitidos, %5$d errores.', 'siigo-connect' ),
+									esc_html( wp_date( 'Y-m-d H:i', $last_run['time'] ) ),
+									(int) $last_run['stats']['updated'],
+									(int) $last_run['stats']['created'],
+									(int) $last_run['stats']['skipped'],
+									(int) $last_run['stats']['errors']
+								);
+								if ( (int) $last_run['stats']['errors'] > 0 ) {
+									echo ' ';
+									esc_html_e( 'Hubo errores: revisa el detalle en la pestaña Registro.', 'siigo-connect' );
+								}
+							}
 							?>
 						</p>
+					<?php else : ?>
+						<p class="description"><?php esc_html_e( 'Aún no hay corridas completadas. Si acabas de sincronizar y no ves resumen, revisa la pestaña Registro: ahí queda el detalle (o el error) de cada corrida.', 'siigo-connect' ); ?></p>
 					<?php endif; ?>
 					<p class="description"><?php esc_html_e( 'Guarda los ajustes antes de sincronizar. El emparejamiento es por SKU de Woo = código del producto en Siigo.', 'siigo-connect' ); ?></p>
 				</td>

@@ -154,6 +154,16 @@ class Siigoc_Product_Sync {
 			// Presupuesto de tiempo agotado: continuar en un evento nuevo.
 			if ( ( time() - $start ) > self::TIME_BUDGET ) {
 				wp_schedule_single_event( time() + 30, self::HOOK_CONTINUE, array( $page, $stats ) );
+				update_option(
+					self::LAST_RUN_OPT,
+					array(
+						'time'      => time(),
+						'stats'     => $stats,
+						'partial'   => true,
+						'next_page' => $page,
+					),
+					false
+				);
 				Siigoc_Logger::log( 'info', 'SYNC', 'products', null, sprintf( 'Corrida parcial, continúa en página %d.', $page ), 0 );
 				return;
 			}
@@ -162,8 +172,9 @@ class Siigoc_Product_Sync {
 		update_option(
 			self::LAST_RUN_OPT,
 			array(
-				'time'  => time(),
-				'stats' => $stats,
+				'time'    => time(),
+				'stats'   => $stats,
+				'partial' => false,
 			),
 			false
 		);
