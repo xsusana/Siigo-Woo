@@ -89,13 +89,12 @@ class Siigoc_Product_Sync {
 		$this->run();
 
 		wp_safe_redirect(
-			add_query_arg(
+			siigoc_admin_url(
+				'siigo-connect',
 				array(
-					'page'   => 'siigo-connect',
 					'tab'    => 'sync',
 					'synced' => '1',
-				),
-				admin_url( 'admin.php' )
+				)
 			)
 		);
 		exit;

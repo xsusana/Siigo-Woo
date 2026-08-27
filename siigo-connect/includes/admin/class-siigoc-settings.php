@@ -225,12 +225,12 @@ class Siigoc_Settings {
 
 			<nav class="nav-tab-wrapper">
 				<?php foreach ( $tabs as $slug => $label ) : ?>
-					<a href="<?php echo esc_url( add_query_arg( array( 'page' => self::PAGE_SLUG, 'tab' => $slug ), admin_url( 'admin.php' ) ) ); ?>"
+					<a href="<?php echo esc_url( siigoc_admin_url( self::PAGE_SLUG, array( 'tab' => $slug ) ) ); ?>"
 						class="nav-tab <?php echo $current === $slug ? 'nav-tab-active' : ''; ?>">
 						<?php echo esc_html( $label ); ?>
 					</a>
 				<?php endforeach; ?>
-				<a href="<?php echo esc_url( add_query_arg( array( 'page' => 'siigo-connect-logs' ), admin_url( 'admin.php' ) ) ); ?>" class="nav-tab">
+				<a href="<?php echo esc_url( siigoc_admin_url( 'siigo-connect-logs' ) ); ?>" class="nav-tab">
 					<?php esc_html_e( 'Registro', 'siigo-connect' ); ?>
 				</a>
 			</nav>

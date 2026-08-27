@@ -38,7 +38,7 @@ class Siigoc_Logs_Page {
 
 		Siigoc_Logger::clear();
 
-		wp_safe_redirect( add_query_arg( array( 'page' => self::PAGE_SLUG, 'cleared' => '1' ), admin_url( 'admin.php' ) ) );
+		wp_safe_redirect( siigoc_admin_url( self::PAGE_SLUG, array( 'cleared' => '1' ) ) );
 		exit;
 	}
 
@@ -61,7 +61,7 @@ class Siigoc_Logs_Page {
 			<?php endif; ?>
 
 			<p>
-				<a class="button" href="<?php echo esc_url( add_query_arg( array( 'page' => 'siigo-connect' ), admin_url( 'admin.php' ) ) ); ?>">
+				<a class="button" href="<?php echo esc_url( siigoc_admin_url() ); ?>">
 					&larr; <?php esc_html_e( 'Volver a ajustes', 'siigo-connect' ); ?>
 				</a>
 			</p>

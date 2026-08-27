@@ -70,6 +70,31 @@ function siigoc_get_settings() {
 }
 
 /**
+ * URL de una página del plugin, según el menú padre disponible.
+ *
+ * @param string $page Slug de la página.
+ * @param array  $args Parámetros extra de la URL.
+ * @return string
+ */
+function siigoc_admin_url( $page = 'siigo-connect', $args = array() ) {
+	$base = class_exists( 'WooCommerce' ) ? 'admin.php' : 'options-general.php';
+
+	return add_query_arg( array_merge( array( 'page' => $page ), $args ), admin_url( $base ) );
+}
+
+// Enlace "Ajustes" en la fila del plugin (Plugins → Plugins instalados).
+add_filter(
+	'plugin_action_links_' . plugin_basename( __FILE__ ),
+	function ( $links ) {
+		array_unshift(
+			$links,
+			'<a href="' . esc_url( siigoc_admin_url() ) . '">' . esc_html__( 'Ajustes', 'siigo-connect' ) . '</a>'
+		);
+		return $links;
+	}
+);
+
+/**
  * Instancia compartida del cliente de la API.
  *
  * @return Siigoc_Api_Client
