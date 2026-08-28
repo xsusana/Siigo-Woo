@@ -411,7 +411,7 @@ class Siigoc_Settings {
 							<option value="<?php echo esc_attr( $tax['id'] ); ?>" <?php selected( (string) $settings['tax_id'], (string) $tax['id'] ); ?>><?php echo esc_html( $tax_label ); ?></option>
 						<?php endforeach; ?>
 					</select>
-					<p class="description"><?php esc_html_e( 'Se aplica a las líneas del pedido que tengan impuesto en WooCommerce. Los precios se envían a Siigo sin IVA y Siigo lo calcula con este impuesto.', 'siigo-connect' ); ?></p>
+					<p class="description"><?php esc_html_e( 'Solo de respaldo: cada línea de la factura usa los impuestos que el producto tiene configurados en Siigo (19%, 5%, exento, etc.). Este impuesto se aplica únicamente si el producto no se encuentra en Siigo al facturar.', 'siigo-connect' ); ?></p>
 				</td>
 			</tr>
 			<tr>

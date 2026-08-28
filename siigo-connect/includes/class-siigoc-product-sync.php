@@ -217,6 +217,7 @@ class Siigoc_Product_Sync {
 		$quantity = isset( $siigo_product['available_quantity'] ) ? (float) $siigo_product['available_quantity'] : null;
 
 		$product_id = wc_get_product_id_by_sku( $code );
+		$tax_ids    = Siigoc_Invoice::extract_tax_ids( $siigo_product );
 
 		if ( $product_id ) {
 			$product = wc_get_product( $product_id );
@@ -226,6 +227,12 @@ class Siigoc_Product_Sync {
 			}
 
 			$changed = false;
+
+			// Impuestos del producto en Siigo, para que la facturación los use sin consultar la API.
+			if ( $product->get_meta( '_siigoc_tax_ids' ) !== $tax_ids ) {
+				$product->update_meta_data( '_siigoc_tax_ids', $tax_ids );
+				$changed = true;
+			}
 
 			if ( 'yes' === $settings['sync_products'] && null !== $price ) {
 				$product->set_regular_price( (string) $price );
@@ -257,6 +264,7 @@ class Siigoc_Product_Sync {
 		$product = new WC_Product_Simple();
 		$product->set_name( isset( $siigo_product['name'] ) ? (string) $siigo_product['name'] : $code );
 		$product->set_sku( $code );
+		$product->update_meta_data( '_siigoc_tax_ids', $tax_ids );
 		// Se crean como borrador para que el tendero revise antes de publicar.
 		$product->set_status( apply_filters( 'siigoc_new_product_status', 'draft' ) );
 

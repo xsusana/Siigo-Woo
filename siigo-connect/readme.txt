@@ -4,7 +4,7 @@ Tags: siigo, woocommerce, facturacion electronica, dian, colombia
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 
 Conecta WooCommerce con Siigo Nube: facturación automática (electrónica o interna), sincronización de productos, inventario y clientes.
@@ -44,6 +44,11 @@ El departamento se deriva del estado de WooCommerce; el municipio usa el código
 Sí: los campos de documento se registran también con la API de campos adicionales de WooCommerce (8.9+), además del checkout clásico.
 
 == Changelog ==
+
+= 1.1.0 =
+* Impuestos por producto: cada línea de la factura usa los impuestos configurados en el producto de Siigo (IVA 19%, 5%, exento, excluido, etc.), consultados automáticamente y cacheados. El impuesto de los ajustes pasa a ser solo un respaldo.
+* La sincronización guarda los impuestos de cada producto para facturar sin consultas extra.
+* El envío también usa los impuestos de su producto en Siigo.
 
 = 1.0.0 =
 * Facturación automática: pedido de Woo → factura en Siigo (electrónica o interna, según comprobante), con creación del tercero, envío a DIAN y correo opcionales.

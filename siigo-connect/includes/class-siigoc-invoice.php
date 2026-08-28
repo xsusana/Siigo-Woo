@@ -283,7 +283,17 @@ class Siigoc_Invoice {
 				'price'       => $price,
 			);
 
-			if ( $tax_id > 0 && (float) $item->get_total_tax() > 0 ) {
+			// Impuestos del propio producto en Siigo (IVA 19%, 5%, exento, etc.).
+			$product_taxes = $this->get_product_tax_ids( (string) $sku, $product );
+
+			if ( is_array( $product_taxes ) ) {
+				// Se conoce la configuración del producto en Siigo: se respeta tal cual
+				// (lista vacía = producto sin impuestos, p. ej. excluido).
+				foreach ( $product_taxes as $product_tax_id ) {
+					$line['taxes'][] = array( 'id' => $product_tax_id );
+				}
+			} elseif ( $tax_id > 0 && (float) $item->get_total_tax() > 0 ) {
+				// No se pudo consultar el producto: impuesto por defecto como respaldo.
 				$line['taxes'] = array( array( 'id' => $tax_id ) );
 			}
 
@@ -311,7 +321,13 @@ class Siigoc_Invoice {
 				'price'       => round( $shipping_total, 2 ),
 			);
 
-			if ( $tax_id > 0 && (float) $order->get_shipping_tax() > 0 ) {
+			$shipping_taxes = $this->get_product_tax_ids( (string) $settings['shipping_sku'], null );
+
+			if ( is_array( $shipping_taxes ) ) {
+				foreach ( $shipping_taxes as $shipping_tax_id ) {
+					$shipping_line['taxes'][] = array( 'id' => $shipping_tax_id );
+				}
+			} elseif ( $tax_id > 0 && (float) $order->get_shipping_tax() > 0 ) {
 				$shipping_line['taxes'] = array( array( 'id' => $tax_id ) );
 			}
 
@@ -319,5 +335,73 @@ class Siigoc_Invoice {
 		}
 
 		return $items;
+	}
+
+	/**
+	 * IDs de los impuestos configurados en Siigo para un producto.
+	 *
+	 * Orden de resolución: meta guardada por la sincronización → caché temporal →
+	 * consulta a la API (y se cachea). Devuelve null si no se pudo determinar
+	 * (producto inexistente en Siigo o error de red): en ese caso el llamador
+	 * decide el respaldo.
+	 *
+	 * @param string          $sku     SKU / código del producto.
+	 * @param WC_Product|null $product Producto de WooCommerce, si existe.
+	 * @return int[]|null
+	 */
+	private function get_product_tax_ids( $sku, $product ) {
+		if ( $product ) {
+			$meta = $product->get_meta( '_siigoc_tax_ids' );
+			if ( is_array( $meta ) ) {
+				return array_map( 'intval', $meta );
+			}
+		}
+
+		$cache_key = 'siigoc_taxes_' . md5( $sku );
+		$cached    = get_transient( $cache_key );
+		if ( is_array( $cached ) ) {
+			return array_map( 'intval', $cached );
+		}
+
+		$response = siigoc_api()->get_product_by_code( $sku );
+		if ( is_wp_error( $response ) ) {
+			return null;
+		}
+
+		$results = isset( $response['results'] ) && is_array( $response['results'] ) ? $response['results'] : array();
+		if ( empty( $results ) ) {
+			return null; // El producto no existe en Siigo con ese código.
+		}
+
+		$ids = self::extract_tax_ids( $results[0] );
+
+		set_transient( $cache_key, $ids, 12 * HOUR_IN_SECONDS );
+
+		if ( $product ) {
+			$product->update_meta_data( '_siigoc_tax_ids', $ids );
+			$product->save();
+		}
+
+		return $ids;
+	}
+
+	/**
+	 * Extrae los IDs de impuestos de un producto según la API de Siigo.
+	 *
+	 * @param array $siigo_product Producto de la API.
+	 * @return int[]
+	 */
+	public static function extract_tax_ids( $siigo_product ) {
+		$ids = array();
+
+		if ( isset( $siigo_product['taxes'] ) && is_array( $siigo_product['taxes'] ) ) {
+			foreach ( $siigo_product['taxes'] as $tax ) {
+				if ( isset( $tax['id'] ) ) {
+					$ids[] = (int) $tax['id'];
+				}
+			}
+		}
+
+		return $ids;
 	}
 }

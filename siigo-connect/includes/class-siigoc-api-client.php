@@ -267,6 +267,16 @@ class Siigoc_Api_Client {
 	}
 
 	/**
+	 * Un producto por su código (SKU).
+	 *
+	 * @param string $code Código del producto en Siigo.
+	 * @return array|WP_Error
+	 */
+	public function get_product_by_code( $code ) {
+		return $this->request( 'GET', '/v1/products', null, array( 'code' => (string) $code ) );
+	}
+
+	/**
 	 * Productos, paginados.
 	 *
 	 * @param int $page      Página (desde 1).
