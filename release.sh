@@ -16,17 +16,26 @@ if [ "$VERSION" != "$CONSTANT" ] || [ "$VERSION" != "$STABLE" ]; then
 	exit 1
 fi
 
+PUBLISH=false
+if [ "${1:-}" = "--publish" ]; then
+	PUBLISH=true
+	if [ -n "$(git status --porcelain)" ]; then
+		echo "Hay cambios sin commit; haz commit antes de publicar." >&2
+		exit 1
+	fi
+fi
+
 rm -f siigo-connect.zip
 zip -rq siigo-connect.zip siigo-connect -x '*.DS_Store'
 echo "siigo-connect.zip generado (v$VERSION)"
 
-if [ "${1:-}" != "--publish" ]; then
+if [ "$PUBLISH" != true ]; then
 	exit 0
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
-	echo "Hay cambios sin commit; haz commit antes de publicar." >&2
-	exit 1
+# El zip regenerado cambia aunque el código no: se guarda el que se publica.
+if ! git diff --quiet -- siigo-connect.zip; then
+	git commit -q -m "Paquete siigo-connect.zip v$VERSION" -- siigo-connect.zip
 fi
 
 # Notas: la sección de esta versión en el changelog de readme.txt.
