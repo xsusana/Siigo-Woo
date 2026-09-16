@@ -1,10 +1,10 @@
 === Siigo Connect para WooCommerce ===
-Contributors: danielserna
+Contributors: xsusana
 Tags: siigo, woocommerce, facturacion electronica, dian, colombia
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.2.1
 License: GPLv2 or later
 
 Conecta WooCommerce con Siigo Nube: facturación automática (electrónica o interna), sincronización de productos, inventario y clientes.
@@ -47,6 +47,9 @@ Desde Plugins → Plugins instalados, con "Actualizar ahora", igual que cualquie
 Sí: los campos de documento se registran también con la API de campos adicionales de WooCommerce (8.9+), además del checkout clásico.
 
 == Changelog ==
+
+= 1.2.1 =
+* Autora del plugin: Susana Pérez.
 
 = 1.2.0 =
 * Actualizaciones desde WordPress: las versiones nuevas publicadas en GitHub aparecen en Plugins con "Actualizar ahora" (y admiten actualizaciones automáticas). Enlace "Buscar actualizaciones" en la fila del plugin y en Conexión.

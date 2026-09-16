@@ -218,7 +218,7 @@ class Siigoc_Updater {
 			'name'          => 'Siigo Connect para WooCommerce',
 			'slug'          => self::SLUG,
 			'version'       => $release['version'],
-			'author'        => 'Daniel Serna',
+			'author'        => 'Susana Pérez',
 			'homepage'      => $release['url'],
 			'requires'      => '6.0',
 			'requires_php'  => '7.4',
