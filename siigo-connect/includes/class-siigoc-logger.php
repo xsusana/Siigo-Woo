@@ -36,7 +36,7 @@ class Siigoc_Logger {
 
 		if ( is_array( $request ) ) {
 			$request = self::redact( $request );
-			$request = wp_json_encode( $request );
+			$request = Siigoc_Api_Client::encode_json( $request );
 		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery

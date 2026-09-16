@@ -229,10 +229,11 @@ class Siigoc_Product_Sync {
 			$changed = false;
 
 			// Impuestos del producto en Siigo, para que la facturación los use sin consultar la API.
-			if ( $product->get_meta( '_siigoc_tax_ids' ) !== $tax_ids ) {
-				$product->update_meta_data( '_siigoc_tax_ids', $tax_ids );
+			if ( $product->get_meta( Siigoc_Invoice::TAX_META ) !== $tax_ids ) {
+				$product->update_meta_data( Siigoc_Invoice::TAX_META, $tax_ids );
 				$changed = true;
 			}
+			$product->update_meta_data( Siigoc_Invoice::TAX_META_AT, time() );
 
 			if ( 'yes' === $settings['sync_products'] && null !== $price ) {
 				$product->set_regular_price( (string) $price );
@@ -249,6 +250,7 @@ class Siigoc_Product_Sync {
 				$product->save();
 				$stats['updated']++;
 			} else {
+				$product->save_meta_data(); // Solo la fecha de verificación de impuestos.
 				$stats['skipped']++;
 			}
 
@@ -264,7 +266,8 @@ class Siigoc_Product_Sync {
 		$product = new WC_Product_Simple();
 		$product->set_name( isset( $siigo_product['name'] ) ? (string) $siigo_product['name'] : $code );
 		$product->set_sku( $code );
-		$product->update_meta_data( '_siigoc_tax_ids', $tax_ids );
+		$product->update_meta_data( Siigoc_Invoice::TAX_META, $tax_ids );
+		$product->update_meta_data( Siigoc_Invoice::TAX_META_AT, time() );
 		// Se crean como borrador para que el tendero revise antes de publicar.
 		$product->set_status( apply_filters( 'siigoc_new_product_status', 'draft' ) );
 

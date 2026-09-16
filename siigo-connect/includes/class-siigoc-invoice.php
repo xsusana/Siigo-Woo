@@ -17,6 +17,13 @@ class Siigoc_Invoice {
 	const META_ERROR    = '_siigoc_invoice_error';
 	const META_QUEUED   = '_siigoc_invoice_queued';
 	const MAX_ATTEMPTS  = 5;
+	const DOC_TYPES_KEY = 'siigoc_document_types';
+	const TAXES_KEY     = 'siigoc_taxes_catalog';
+	const CATALOG_TTL   = 21600; // 6 horas.
+
+	const TAX_META      = '_siigoc_tax_ids';
+	const TAX_META_AT   = '_siigoc_tax_ids_at';
+	const TAX_TTL       = 43200; // 12 horas: pasado ese tiempo se vuelve a consultar Siigo.
 
 	/**
 	 * Espera en segundos antes de cada reintento (índice = intento fallido).
@@ -190,6 +197,18 @@ class Siigoc_Invoice {
 			}
 		}
 
+		$document_type = $this->get_document_type( (int) $settings['document_type_id'] );
+		if ( is_wp_error( $document_type ) ) {
+			return $document_type;
+		}
+
+		if ( ! empty( $document_type['cost_center_mandatory'] ) && '' === (string) $settings['cost_center_id'] ) {
+			return new WP_Error(
+				'siigoc_missing_cost_center',
+				__( 'El tipo de comprobante exige centro de costo. Selecciónalo en WooCommerce → Siigo Connect → Facturación.', 'siigo-connect' )
+			);
+		}
+
 		$customer = Siigoc_Customer::find_or_create( $order );
 		if ( is_wp_error( $customer ) ) {
 			return $customer;
@@ -223,6 +242,15 @@ class Siigoc_Invoice {
 			),
 		);
 
+		// Comprobantes con "vendedor por ítem": Siigo exige el vendedor en cada línea
+		// y rechaza la factura si solo viene en la raíz.
+		if ( ! empty( $document_type['seller_by_item'] ) ) {
+			unset( $payload['seller'] );
+			foreach ( $payload['items'] as $index => $line ) {
+				$payload['items'][ $index ]['seller'] = (int) $settings['seller_id'];
+			}
+		}
+
 		if ( '' !== (string) $settings['cost_center_id'] ) {
 			$payload['cost_center'] = (int) $settings['cost_center_id'];
 		}
@@ -243,7 +271,224 @@ class Siigoc_Invoice {
 		 */
 		$payload = apply_filters( 'siigoc_invoice_payload', $payload, $order );
 
-		return siigoc_api()->request( 'POST', '/v1/invoices', $payload );
+		$result = siigoc_api()->request( 'POST', '/v1/invoices', $payload );
+
+		if ( self::is_payment_mismatch( $result ) && 1 === count( $payload['payments'] ) ) {
+			$result = $this->retry_with_siigo_total( $order, $payload, $result );
+		}
+
+		return $result;
+	}
+
+	/**
+	 * ¿Siigo rechazó la factura porque el pago no coincide con su total?
+	 *
+	 * @param mixed $result Respuesta de la API.
+	 * @return bool
+	 */
+	private static function is_payment_mismatch( $result ) {
+		if ( ! is_wp_error( $result ) ) {
+			return false;
+		}
+
+		$data   = $result->get_error_data();
+		$errors = isset( $data['body']['Errors'] ) && is_array( $data['body']['Errors'] ) ? $data['body']['Errors'] : array();
+
+		foreach ( $errors as $error ) {
+			if ( isset( $error['Code'] ) && 'invalid_total_payments' === $error['Code'] ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Reintenta con el total que Siigo calcula para las líneas enviadas.
+	 *
+	 * Con precios con IVA incluido y varias tarifas, al separar base e IVA el
+	 * total puede quedar a centavos de lo pagado y Siigo rechaza la factura. Siigo
+	 * no documenta cómo redondea, así que se prueban los totales de las formas de
+	 * redondeo posibles. Un intento rechazado no crea factura ni llega a la DIAN.
+	 *
+	 * @param WC_Order $order   Pedido.
+	 * @param array    $payload Payload rechazado.
+	 * @param WP_Error $error   Error original.
+	 * @return array|WP_Error
+	 */
+	private function retry_with_siigo_total( $order, $payload, $error ) {
+		$sent       = (float) $payload['payments'][0]['value'];
+		$candidates = $this->total_candidates( $payload['items'] );
+
+		if ( is_wp_error( $candidates ) ) {
+			return $error;
+		}
+
+		// Solo diferencias de redondeo: nunca más de 1 peso por línea.
+		$tolerance = max( 1, count( $payload['items'] ) );
+
+		foreach ( $candidates as $total ) {
+			if ( abs( $total - $sent ) < 0.005 || abs( $total - $sent ) > $tolerance ) {
+				continue;
+			}
+
+			$payload['payments'][0]['value'] = $total;
+
+			$result = siigoc_api()->request( 'POST', '/v1/invoices', $payload );
+
+			if ( ! self::is_payment_mismatch( $result ) ) {
+				if ( ! is_wp_error( $result ) ) {
+					$order->add_order_note(
+						sprintf(
+							/* translators: 1: total pagado, 2: total de la factura. */
+							__( 'Siigo Connect: el pago de la factura se ajustó de %1$s a %2$s por redondeo del IVA en Siigo.', 'siigo-connect' ),
+							wc_format_decimal( $sent, 2 ),
+							wc_format_decimal( $total, 2 )
+						)
+					);
+				}
+				return $result;
+			}
+		}
+
+		return $this->explain_mismatch( $payload['items'], $error );
+	}
+
+	/**
+	 * Si el descuadre no es de redondeo, lo más probable es que un producto
+	 * tenga retenciones configuradas en Siigo (Siigo las resta del total).
+	 *
+	 * @param array    $items Ítems enviados.
+	 * @param WP_Error $error Error de Siigo.
+	 * @return WP_Error
+	 */
+	private function explain_mismatch( $items, $error ) {
+		$rates = $this->tax_rates_by_id();
+		if ( is_wp_error( $rates ) ) {
+			return $error;
+		}
+
+		$codes = array();
+		foreach ( $items as $item ) {
+			foreach ( isset( $item['taxes'] ) && is_array( $item['taxes'] ) ? $item['taxes'] : array() as $tax ) {
+				$tax_id = isset( $tax['id'] ) ? (int) $tax['id'] : 0;
+				if ( isset( $rates[ $tax_id ] ) && $rates[ $tax_id ]['withholding'] ) {
+					$codes[] = $item['code'];
+				}
+			}
+		}
+
+		if ( empty( $codes ) ) {
+			return $error;
+		}
+
+		return new WP_Error(
+			'siigoc_withholding_mismatch',
+			sprintf(
+				/* translators: %s: códigos de producto. */
+				__( 'El total no cuadra con lo pagado porque estos productos tienen retenciones configuradas en Siigo, que se restan del total de la factura: %s. En ventas de la tienda al consumidor normalmente no aplican; quítalas del producto en Siigo y reintenta.', 'siigo-connect' ),
+				implode( ', ', array_unique( $codes ) )
+			),
+			$error->get_error_data()
+		);
+	}
+
+	/**
+	 * Totales posibles de la factura según cómo redondee Siigo el IVA.
+	 *
+	 * @param array $items Ítems enviados.
+	 * @return float[]|WP_Error
+	 */
+	private function total_candidates( $items ) {
+		$rates = $this->tax_rates_by_id();
+		if ( is_wp_error( $rates ) ) {
+			return $rates;
+		}
+
+		$totals = array();
+
+		// Medio centavo hacia arriba, o al par (redondeo bancario).
+		foreach ( array( PHP_ROUND_HALF_UP, PHP_ROUND_HALF_EVEN ) as $mode ) {
+			$exact     = 0.0; // Sin redondeos intermedios.
+			$per_line  = 0.0; // Base e impuesto redondeados por línea.
+			$per_tax   = 0.0; // Base por línea; impuesto redondeado por tarifa.
+			$tax_bases = array();
+
+			foreach ( $items as $item ) {
+				$raw_base = (float) $item['price'] * (float) $item['quantity'];
+				$base     = self::round_money( $raw_base, $mode );
+
+				$exact    += $raw_base;
+				$per_line += $base;
+				$per_tax  += $base;
+
+				$tax_list = isset( $item['taxes'] ) && is_array( $item['taxes'] ) ? $item['taxes'] : array();
+
+				foreach ( $tax_list as $tax ) {
+					$tax_id = isset( $tax['id'] ) ? (int) $tax['id'] : 0;
+					if ( ! isset( $rates[ $tax_id ] ) || $rates[ $tax_id ]['withholding'] ) {
+						continue;
+					}
+
+					$exact    += $raw_base * $rates[ $tax_id ]['rate'] / 100;
+					$per_line += self::round_money( $base * $rates[ $tax_id ]['rate'] / 100, $mode );
+
+					$tax_bases[ $tax_id ] = ( isset( $tax_bases[ $tax_id ] ) ? $tax_bases[ $tax_id ] : 0 ) + $base;
+				}
+			}
+
+			foreach ( $tax_bases as $tax_id => $tax_base ) {
+				$per_tax += self::round_money( $tax_base * $rates[ $tax_id ]['rate'] / 100, $mode );
+			}
+
+			foreach ( array( $exact, $per_line, $per_tax ) as $total ) {
+				$totals[] = self::round_money( $total, $mode );
+			}
+		}
+
+		return array_values( array_unique( $totals, SORT_REGULAR ) );
+	}
+
+	/**
+	 * Redondeo a centavos sin el ruido de los flotantes (41.345 no debe
+	 * convertirse en 41.34 por venir como 41.344999999).
+	 *
+	 * @param float $value Valor.
+	 * @param int   $mode  PHP_ROUND_HALF_UP o PHP_ROUND_HALF_EVEN.
+	 * @return float
+	 */
+	private static function round_money( $value, $mode = PHP_ROUND_HALF_UP ) {
+		return round( round( $value, 6 ), 2, $mode );
+	}
+
+	/**
+	 * Tarifas del catálogo de impuestos de Siigo.
+	 *
+	 * @return array<int, array{rate: float, withholding: bool}>|WP_Error
+	 */
+	private function tax_rates_by_id() {
+		$catalog = self::get_catalog( self::TAXES_KEY, 'get_taxes' );
+		if ( is_wp_error( $catalog ) ) {
+			return $catalog;
+		}
+
+		$rates = array();
+		foreach ( $catalog as $tax ) {
+			if ( ! isset( $tax['id'] ) ) {
+				continue;
+			}
+
+			$type = isset( $tax['type'] ) ? strtolower( (string) $tax['type'] ) : '';
+
+			$rates[ (int) $tax['id'] ] = array(
+				'rate'        => isset( $tax['percentage'] ) ? (float) $tax['percentage'] : 0.0,
+				// Las retenciones las descuenta quien compra: no forman parte del
+				// precio que pagó el cliente.
+				'withholding' => false !== strpos( $type, 'rete' ) || false !== strpos( $type, 'autorre' ) || false !== strpos( $type, 'autore' ),
+			);
+		}
+
+		return $rates;
 	}
 
 	/**
@@ -272,9 +517,23 @@ class Siigoc_Invoice {
 				);
 			}
 
-			$quantity = max( 1, (float) $item->get_quantity() );
-			// Precio unitario sin IVA y con descuentos ya aplicados.
-			$price = round( (float) $order->get_item_total( $item, false, false ), 2 );
+			$quantity = round( max( 1, (float) $item->get_quantity() ), 2 );
+			// Precio unitario con descuentos aplicados; sin IVA si WooCommerce lo calculó.
+			$price = (float) $order->get_item_total( $item, false, false );
+
+			// Impuestos del propio producto en Siigo (IVA 19%, 5%, exento, etc.).
+			$product_taxes = $this->get_product_tax_ids( (string) $sku, $product );
+
+			if ( null === $product_taxes && (float) $item->get_total_tax() <= 0 ) {
+				// Precio con IVA incluido y sin saber qué IVA lleva: facturar así saldría
+				// sin impuestos ante la DIAN. Mejor fallar y reintentar.
+				return self::unknown_taxes_error( (string) $sku, $item->get_name() );
+			}
+
+			$price = $this->net_price( $price, (float) $item->get_total_tax(), $product_taxes );
+			if ( is_wp_error( $price ) ) {
+				return $price;
+			}
 
 			$line = array(
 				'code'        => (string) $sku,
@@ -282,9 +541,6 @@ class Siigoc_Invoice {
 				'quantity'    => $quantity,
 				'price'       => $price,
 			);
-
-			// Impuestos del propio producto en Siigo (IVA 19%, 5%, exento, etc.).
-			$product_taxes = $this->get_product_tax_ids( (string) $sku, $product );
 
 			if ( is_array( $product_taxes ) ) {
 				// Se conoce la configuración del producto en Siigo: se respeta tal cual
@@ -314,14 +570,23 @@ class Siigoc_Invoice {
 				);
 			}
 
+			$shipping_taxes = $this->get_product_tax_ids( (string) $settings['shipping_sku'], null );
+
+			if ( null === $shipping_taxes && (float) $order->get_shipping_tax() <= 0 ) {
+				return self::unknown_taxes_error( (string) $settings['shipping_sku'], __( 'Costo de envío', 'siigo-connect' ) );
+			}
+
+			$shipping_price = $this->net_price( $shipping_total, (float) $order->get_shipping_tax(), $shipping_taxes );
+			if ( is_wp_error( $shipping_price ) ) {
+				return $shipping_price;
+			}
+
 			$shipping_line = array(
 				'code'        => (string) $settings['shipping_sku'],
 				'description' => __( 'Costo de envío', 'siigo-connect' ),
 				'quantity'    => 1,
-				'price'       => round( $shipping_total, 2 ),
+				'price'       => $shipping_price,
 			);
-
-			$shipping_taxes = $this->get_product_tax_ids( (string) $settings['shipping_sku'], null );
 
 			if ( is_array( $shipping_taxes ) ) {
 				foreach ( $shipping_taxes as $shipping_tax_id ) {
@@ -338,6 +603,154 @@ class Siigoc_Invoice {
 	}
 
 	/**
+	 * Error cuando no se pudieron leer los impuestos de un producto en Siigo.
+	 *
+	 * @param string $sku  Código del producto.
+	 * @param string $name Nombre para el mensaje.
+	 * @return WP_Error
+	 */
+	private static function unknown_taxes_error( $sku, $name ) {
+		return new WP_Error(
+			'siigoc_unknown_product_taxes',
+			sprintf(
+				/* translators: 1: nombre del producto, 2: código. */
+				__( 'No se pudo consultar en Siigo el IVA de "%1$s" (código %2$s). Verifica que el producto exista en Siigo con ese código; si existe, fue un fallo temporal y se reintentará.', 'siigo-connect' ),
+				$name,
+				$sku
+			)
+		);
+	}
+
+	/**
+	 * Precio unitario sin IVA que se envía a Siigo.
+	 *
+	 * Si WooCommerce ya separó el impuesto de la línea, el precio recibido es la
+	 * base. Si no (impuestos desactivados en la tienda o producto sin clase de
+	 * impuesto) el cliente pagó el precio final: se le quita el IVA/impoconsumo
+	 * que el producto tiene en Siigo para que el total de la factura coincida con
+	 * lo pagado. Se envían 6 decimales (máximo que acepta Siigo) para que el total
+	 * no se desvíe por redondeo al multiplicar por la cantidad.
+	 *
+	 * @param float      $price    Precio unitario tomado de WooCommerce.
+	 * @param float      $woo_tax  Impuesto que WooCommerce calculó para la línea.
+	 * @param int[]|null $tax_ids  Impuestos del producto en Siigo (null = desconocidos).
+	 * @return float|WP_Error
+	 */
+	private function net_price( $price, $woo_tax, $tax_ids ) {
+		if ( $woo_tax <= 0 && is_array( $tax_ids ) && ! empty( $tax_ids ) ) {
+			$rate = $this->included_tax_rate( $tax_ids );
+			if ( is_wp_error( $rate ) ) {
+				return $rate;
+			}
+			if ( $rate > 0 ) {
+				$price = $price / ( 1 + $rate / 100 );
+			}
+		}
+
+		return round( $price, 6 );
+	}
+
+	/**
+	 * Porcentaje total de los impuestos que van incluidos en el precio al
+	 * consumidor (IVA e impoconsumo), según el catálogo de impuestos de Siigo.
+	 *
+	 * @param int[] $tax_ids IDs de impuestos de Siigo.
+	 * @return float|WP_Error
+	 */
+	private function included_tax_rate( $tax_ids ) {
+		$rates = $this->tax_rates_by_id();
+		if ( is_wp_error( $rates ) ) {
+			return $rates;
+		}
+
+		$rate = 0.0;
+		foreach ( $tax_ids as $tax_id ) {
+			if ( ! isset( $rates[ (int) $tax_id ] ) ) {
+				delete_transient( self::TAXES_KEY ); // Puede ser un impuesto recién creado.
+				return new WP_Error(
+					'siigoc_unknown_tax',
+					sprintf(
+						/* translators: %d: ID del impuesto. */
+						__( 'El impuesto con ID %d no aparece en el catálogo de impuestos de Siigo.', 'siigo-connect' ),
+						(int) $tax_id
+					)
+				);
+			}
+
+			// Todo impuesto porcentual va incluido en el precio al consumidor (IVA de
+			// cualquier tarifa, impoconsumo, ICUI...), salvo las retenciones.
+			if ( ! $rates[ (int) $tax_id ]['withholding'] ) {
+				$rate += $rates[ (int) $tax_id ]['rate'];
+			}
+		}
+
+		return $rate;
+	}
+
+	/**
+	 * Configuración del tipo de comprobante en Siigo (vendedor por ítem, centro
+	 * de costo obligatorio, etc.).
+	 *
+	 * @param int $document_type_id ID del comprobante.
+	 * @return array|WP_Error
+	 */
+	private function get_document_type( $document_type_id ) {
+		$catalog = self::get_catalog( self::DOC_TYPES_KEY, 'get_document_types' );
+		if ( is_wp_error( $catalog ) ) {
+			return $catalog;
+		}
+
+		foreach ( $catalog as $type ) {
+			if ( isset( $type['id'] ) && (int) $type['id'] === $document_type_id ) {
+				return $type;
+			}
+		}
+
+		delete_transient( self::DOC_TYPES_KEY );
+
+		return new WP_Error(
+			'siigoc_unknown_document_type',
+			__( 'El tipo de comprobante configurado no existe en Siigo. Vuelve a seleccionarlo en WooCommerce → Siigo Connect → Facturación.', 'siigo-connect' )
+		);
+	}
+
+	/**
+	 * Lista de la API (comprobantes, impuestos) cacheada unas horas.
+	 *
+	 * @param string $cache_key Transient.
+	 * @param string $method    Método de Siigoc_Api_Client.
+	 * @return array|WP_Error
+	 */
+	private static function get_catalog( $cache_key, $method ) {
+		$cached = get_transient( $cache_key );
+		if ( is_array( $cached ) && ! empty( $cached ) ) {
+			return $cached;
+		}
+
+		$result = siigoc_api()->$method();
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		// Algunos endpoints devuelven { results: [...] }, otros la lista directa.
+		$list = isset( $result['results'] ) && is_array( $result['results'] ) ? $result['results'] : $result;
+
+		if ( ! empty( $list ) ) {
+			set_transient( $cache_key, $list, self::CATALOG_TTL );
+		}
+
+		return $list;
+	}
+
+	/**
+	 * Borra los catálogos cacheados (al cambiar ajustes o credenciales).
+	 */
+	public static function flush_catalogs() {
+		delete_transient( self::DOC_TYPES_KEY );
+		delete_transient( self::TAXES_KEY );
+	}
+
+	/**
 	 * IDs de los impuestos configurados en Siigo para un producto.
 	 *
 	 * Orden de resolución: meta guardada por la sincronización → caché temporal →
@@ -351,8 +764,10 @@ class Siigoc_Invoice {
 	 */
 	private function get_product_tax_ids( $sku, $product ) {
 		if ( $product ) {
-			$meta = $product->get_meta( '_siigoc_tax_ids' );
-			if ( is_array( $meta ) ) {
+			$meta    = $product->get_meta( self::TAX_META );
+			$meta_at = (int) $product->get_meta( self::TAX_META_AT );
+			// Solo si es reciente: si cambiaron el IVA del producto en Siigo, se nota en horas.
+			if ( is_array( $meta ) && ( time() - $meta_at ) < self::TAX_TTL ) {
 				return array_map( 'intval', $meta );
 			}
 		}
@@ -375,10 +790,11 @@ class Siigoc_Invoice {
 
 		$ids = self::extract_tax_ids( $results[0] );
 
-		set_transient( $cache_key, $ids, 12 * HOUR_IN_SECONDS );
+		set_transient( $cache_key, $ids, self::TAX_TTL );
 
 		if ( $product ) {
-			$product->update_meta_data( '_siigoc_tax_ids', $ids );
+			$product->update_meta_data( self::TAX_META, $ids );
+			$product->update_meta_data( self::TAX_META_AT, time() );
 			$product->save();
 		}
 

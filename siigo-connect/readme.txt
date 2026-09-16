@@ -4,7 +4,7 @@ Tags: siigo, woocommerce, facturacion electronica, dian, colombia
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 
 Conecta WooCommerce con Siigo Nube: facturación automática (electrónica o interna), sincronización de productos, inventario y clientes.
@@ -40,10 +40,26 @@ El plugin reintenta automáticamente hasta 5 veces con esperas crecientes (5 min
 = ¿De dónde salen los códigos DANE de la ciudad del tercero? =
 El departamento se deriva del estado de WooCommerce; el municipio usa el código por defecto configurado. Para un mapeo fino usa el filtro `siigoc_customer_city`.
 
+= ¿Cómo se actualiza el plugin? =
+Desde Plugins → Plugins instalados, con "Actualizar ahora", igual que cualquier plugin. Las versiones se publican como releases del repositorio de GitHub. Si el repositorio es privado, configura un token de GitHub de solo lectura en WooCommerce → Siigo Connect → Conexión (o la constante `SIIGOC_GITHUB_TOKEN` en wp-config.php).
+
 = ¿Funciona con el checkout por bloques? =
 Sí: los campos de documento se registran también con la API de campos adicionales de WooCommerce (8.9+), además del checkout clásico.
 
 == Changelog ==
+
+= 1.2.0 =
+* Actualizaciones desde WordPress: las versiones nuevas publicadas en GitHub aparecen en Plugins con "Actualizar ahora" (y admiten actualizaciones automáticas). Enlace "Buscar actualizaciones" en la fila del plugin y en Conexión.
+* Facturación: si el comprobante tiene "vendedor por ítem", el vendedor se envía en cada línea (antes Siigo rechazaba la factura).
+* Facturación: cuando WooCommerce no separa el IVA (precios finales al consumidor), se envía la base gravable quitando el IVA/impoconsumo real de cada producto en Siigo (19%, 5%...), para que el total coincida con lo pagado. También aplica al envío.
+* Precios con IVA incluido y varias tarifas: se soporta cualquier tarifa porcentual que el producto tenga en Siigo (IVA 0/5/16/19%, impoconsumo, ICUI...), sin configurar nada por tarifa. Las retenciones no se descuentan del precio.
+* Si Siigo rechaza la factura porque el pago difiere del total por centavos de redondeo del IVA, se reintenta con el total de Siigo (máximo 1 peso por línea) y queda una nota en el pedido.
+* Si no se puede leer el IVA de un producto en Siigo, la factura no se emite (se reintenta) en lugar de salir sin impuestos.
+* El IVA guardado de cada producto se vuelve a consultar en Siigo cada 12 horas, para reflejar cambios de tarifa.
+* Facturación: los precios se envían con decimales limpios (corrige "price amount is invalid" en servidores con serialize_precision antiguo).
+* Terceros: el teléfono se normaliza (solo dígitos, sin +57); si no es válido no se envía.
+* Error claro si el comprobante exige centro de costo y no está configurado.
+* Incluye las correcciones del snippet "Siigo Connect — Correcciones de Integración": desactívalo al actualizar (el plugin avisa si sigue activo).
 
 = 1.1.0 =
 * Impuestos por producto: cada línea de la factura usa los impuestos configurados en el producto de Siigo (IVA 19%, 5%, exento, excluido, etc.), consultados automáticamente y cacheados. El impuesto de los ajustes pasa a ser solo un respaldo.

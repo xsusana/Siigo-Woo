@@ -140,12 +140,31 @@ class Siigoc_Customer {
 			}
 		}
 
-		$phone = trim( (string) $order->get_billing_phone() );
+		$phone = self::sanitize_phone( (string) $order->get_billing_phone() );
 		if ( '' !== $phone ) {
 			$payload['phones'] = array( array( 'number' => $phone ) );
 		}
 
 		return $payload;
+	}
+
+	/**
+	 * Deja el teléfono como lo acepta Siigo: solo dígitos, sin indicativo +57,
+	 * entre 7 y 10 dígitos. Si no cumple se devuelve vacío y no se envía.
+	 *
+	 * @param string $phone Teléfono tal como lo escribió el cliente.
+	 * @return string
+	 */
+	public static function sanitize_phone( $phone ) {
+		$number = preg_replace( '/\D+/', '', $phone );
+
+		if ( strlen( $number ) > 10 && '57' === substr( $number, 0, 2 ) ) {
+			$number = substr( $number, 2 );
+		}
+
+		$length = strlen( $number );
+
+		return ( $length >= 7 && $length <= 10 ) ? $number : '';
 	}
 
 	/**

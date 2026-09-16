@@ -3,18 +3,19 @@
  * Plugin Name:       Siigo Connect para WooCommerce
  * Plugin URI:        https://github.com/danielserna/siigo-connect
  * Description:       Conecta WooCommerce con Siigo Nube: facturación automática (electrónica o interna), sincronización de productos, inventario y clientes.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Daniel Serna
  * License:           GPL-2.0-or-later
  * Text Domain:       siigo-connect
  * Domain Path:       /languages
+ * Update URI:        https://github.com/xsusana/Siigo-Woo
  */
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'SIIGOC_VERSION', '1.1.0' );
+define( 'SIIGOC_VERSION', '1.2.0' );
 define( 'SIIGOC_PLUGIN_FILE', __FILE__ );
 define( 'SIIGOC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'SIIGOC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -26,6 +27,7 @@ require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-checkout-fields.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-customer.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-invoice.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-product-sync.php';
+require_once SIIGOC_PLUGIN_DIR . 'includes/class-siigoc-updater.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/admin/class-siigoc-settings.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/admin/class-siigoc-logs-page.php';
 require_once SIIGOC_PLUGIN_DIR . 'includes/admin/class-siigoc-order-metabox.php';
@@ -44,6 +46,7 @@ function siigoc_get_settings() {
 		'username'         => '',
 		'access_key'       => '',
 		'partner_id'       => 'SiigoConnectWP',
+		'github_token'     => '',
 		// Facturación.
 		'document_type_id' => '',
 		'trigger'          => 'paid', // paid | completed | manual.
@@ -120,9 +123,20 @@ function siigoc_api() {
 function siigoc_init() {
 	load_plugin_textdomain( 'siigo-connect', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
 
+	// Tras actualizar desde WordPress no se ejecuta el hook de activación:
+	// aplicar aquí las rutinas de instalación de la versión nueva.
+	if ( get_option( 'siigoc_version' ) !== SIIGOC_VERSION ) {
+		Siigoc_Install::activate();
+		Siigoc_Invoice::flush_catalogs();
+	}
+
+	// Actualizaciones desde GitHub (también corren por cron, fuera del admin).
+	new Siigoc_Updater();
+
 	if ( is_admin() ) {
 		new Siigoc_Settings();
 		new Siigoc_Logs_Page();
+		add_action( 'admin_notices', 'siigoc_external_payload_filter_notice' );
 	}
 
 	// Limpieza diaria del log (entradas de más de 30 días).
@@ -152,6 +166,23 @@ add_action( 'plugins_loaded', 'siigoc_init' );
 function siigoc_woocommerce_missing_notice() {
 	echo '<div class="notice notice-warning"><p>';
 	echo esc_html__( 'Siigo Connect: WooCommerce no está activo. Puedes configurar la conexión con Siigo, pero la facturación y la sincronización requieren WooCommerce.', 'siigo-connect' );
+	echo '</p></div>';
+}
+
+/**
+ * Aviso si otro código (p. ej. un snippet) modifica el payload de la factura.
+ *
+ * Desde la 1.2.0 el plugin ya incluye las correcciones que antes se aplicaban
+ * con el snippet "Siigo Connect — Correcciones de Integración"; si sigue activo
+ * le quitaría el IVA dos veces al precio.
+ */
+function siigoc_external_payload_filter_notice() {
+	if ( ! current_user_can( 'manage_options' ) || ! has_filter( 'siigoc_invoice_payload' ) ) {
+		return;
+	}
+
+	echo '<div class="notice notice-error"><p><strong>' . esc_html__( 'Siigo Connect:', 'siigo-connect' ) . '</strong> ';
+	echo esc_html__( 'hay código externo modificando la factura (filtro siigoc_invoice_payload). Si es el snippet "Siigo Connect — Correcciones de Integración", desactívalo: esta versión ya incluye esas correcciones (vendedor por ítem, IVA incluido, decimales y teléfonos) y con el snippet activo el IVA se descontaría dos veces.', 'siigo-connect' );
 	echo '</p></div>';
 }
 

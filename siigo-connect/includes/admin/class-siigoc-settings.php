@@ -73,6 +73,20 @@ class Siigoc_Settings {
 			}
 		}
 
+		if ( array_key_exists( 'github_token', $input ) ) {
+			$github_token = trim( (string) $input['github_token'] );
+			// Igual que el access key: vacío = conservar el guardado.
+			if ( '' !== $github_token ) {
+				$clean['github_token'] = sanitize_text_field( $github_token );
+			}
+			if ( ! empty( $input['github_token_clear'] ) ) {
+				$clean['github_token'] = '';
+			}
+			if ( $clean['github_token'] !== $saved['github_token'] ) {
+				delete_transient( Siigoc_Updater::CACHE_KEY );
+			}
+		}
+
 		if ( array_key_exists( 'trigger', $input ) ) {
 			$clean['trigger'] = in_array( $input['trigger'], array( 'paid', 'completed', 'manual' ), true ) ? $input['trigger'] : 'paid';
 		}
@@ -103,6 +117,9 @@ class Siigoc_Settings {
 			delete_transient( Siigoc_Api_Client::TOKEN_TRANSIENT );
 			delete_transient( self::CACHE_KEY );
 		}
+
+		// El comprobante o sus reglas pueden haber cambiado en Siigo.
+		Siigoc_Invoice::flush_catalogs();
 
 		return $clean;
 	}
@@ -145,6 +162,7 @@ class Siigoc_Settings {
 		}
 
 		delete_transient( self::CACHE_KEY );
+		Siigoc_Invoice::flush_catalogs();
 		wp_send_json_success( array( 'message' => __( 'Conexión exitosa con Siigo.', 'siigo-connect' ) ) );
 	}
 
@@ -289,6 +307,44 @@ class Siigoc_Settings {
 					<button type="button" class="button" id="siigoc-test-connection"><?php esc_html_e( 'Probar conexión', 'siigo-connect' ); ?></button>
 					<span id="siigoc-test-result"></span>
 					<p class="description"><?php esc_html_e( 'Guarda las credenciales antes de probar.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+		</table>
+
+		<h2><?php esc_html_e( 'Actualizaciones', 'siigo-connect' ); ?></h2>
+		<table class="form-table" role="presentation">
+			<tr>
+				<th scope="row"><?php esc_html_e( 'Versión', 'siigo-connect' ); ?></th>
+				<td>
+					<?php
+					$release = get_transient( Siigoc_Updater::CACHE_KEY );
+					/* translators: %s: versión instalada. */
+					echo esc_html( sprintf( __( 'Instalada: %s', 'siigo-connect' ), SIIGOC_VERSION ) );
+					if ( is_array( $release ) && ! empty( $release['version'] ) ) {
+						echo ' &mdash; ';
+						/* translators: %s: última versión publicada. */
+						echo esc_html( sprintf( __( 'última publicada: %s', 'siigo-connect' ), $release['version'] ) );
+					} elseif ( is_array( $release ) && ! empty( $release['error'] ) ) {
+						echo '<br /><span style="color:#b32d2e;">' . esc_html( $release['error'] ) . '</span>';
+					}
+					?>
+					<p><a class="button" href="<?php echo esc_url( Siigoc_Updater::check_now_url() ); ?>"><?php esc_html_e( 'Buscar actualizaciones', 'siigo-connect' ); ?></a></p>
+					<p class="description"><?php esc_html_e( 'Las versiones nuevas aparecen en Plugins → Plugins instalados con el botón "Actualizar ahora", como cualquier otro plugin.', 'siigo-connect' ); ?></p>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row"><label for="siigoc-github-token"><?php esc_html_e( 'Token de GitHub', 'siigo-connect' ); ?></label></th>
+				<td>
+					<?php if ( defined( 'SIIGOC_GITHUB_TOKEN' ) ) : ?>
+						<p><?php esc_html_e( 'Definido en wp-config.php (SIIGOC_GITHUB_TOKEN).', 'siigo-connect' ); ?></p>
+					<?php else : ?>
+						<input name="<?php echo esc_attr( self::OPTION ); ?>[github_token]" id="siigoc-github-token" type="password" class="regular-text" value="" autocomplete="new-password"
+							placeholder="<?php echo '' !== $settings['github_token'] ? esc_attr__( '•••••••• (guardado — deja vacío para conservarlo)', 'siigo-connect' ) : ''; ?>" />
+						<?php if ( '' !== $settings['github_token'] ) : ?>
+							<br /><label><input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[github_token_clear]" value="1" /> <?php esc_html_e( 'Borrar el token guardado', 'siigo-connect' ); ?></label>
+						<?php endif; ?>
+					<?php endif; ?>
+					<p class="description"><?php esc_html_e( 'Solo si el repositorio de GitHub del plugin es privado: token "fine-grained" con acceso de solo lectura (Contents: Read-only) a ese repositorio.', 'siigo-connect' ); ?></p>
 				</td>
 			</tr>
 		</table>

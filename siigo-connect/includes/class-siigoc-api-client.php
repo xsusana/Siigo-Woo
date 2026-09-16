@@ -149,7 +149,7 @@ class Siigoc_Api_Client {
 		);
 
 		if ( null !== $body ) {
-			$args['body'] = wp_json_encode( $body );
+			$args['body'] = self::encode_json( $body );
 		}
 
 		$response = wp_remote_request( $url, $args );
@@ -179,6 +179,33 @@ class Siigoc_Api_Client {
 				'body'   => $decoded,
 			)
 		);
+	}
+
+	/**
+	 * Codifica el cuerpo en JSON con los decimales tal cual se redondearon.
+	 *
+	 * Si el servidor tiene serialize_precision en 17 (configuración antigua de
+	 * PHP), json_encode convierte 41932.77 en 41932.769999999997 y Siigo responde
+	 * "price amount is invalid". Con -1 se usa la representación más corta.
+	 *
+	 * @param array $data Datos a codificar.
+	 * @return string
+	 */
+	public static function encode_json( $data ) {
+		$can_change = function_exists( 'ini_get' ) && function_exists( 'ini_set' );
+		$previous   = $can_change ? ini_get( 'serialize_precision' ) : false;
+
+		if ( $can_change ) {
+			ini_set( 'serialize_precision', '-1' ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		}
+
+		$json = wp_json_encode( $data );
+
+		if ( $can_change && false !== $previous ) {
+			ini_set( 'serialize_precision', $previous ); // phpcs:ignore WordPress.PHP.IniSet.Risky
+		}
+
+		return (string) $json;
 	}
 
 	/**
